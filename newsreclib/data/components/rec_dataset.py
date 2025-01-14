@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-
+import ast
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from transformers import PreTrainedTokenizer
-
+from datetime import datetime
 from newsreclib.data.components.batch import RecommendationBatch
 from newsreclib.data.components.mind_dataframe import MINDDataFrame
 
@@ -14,14 +14,11 @@ from newsreclib.data.components.mind_dataframe import MINDDataFrame
 class RecommendationDatasetTrain(MINDDataFrame):
     """
     Attributes:
-        news:
-            A dataframe containing news with various features (e.g., title, category)
-        behaviors:
-            A dataframe of user click behaviors.
-        max_history_len:
-            Maximum history length.
-        neg_sampling_ratio:
-            The number of negatives to positives to sample for training.
+        news: A dataframe containing news with various features (e.g., title, category)
+        behaviors: A dataframe of user click behaviors.
+        max_history_len: Maximum history length.
+        neg_sampling_ratio: The number of negatives to positives to sample for training.
+        include_usr_eng: Controlling if we should include user engagement metrics
     """
 
     def __init__(
@@ -30,35 +27,129 @@ class RecommendationDatasetTrain(MINDDataFrame):
         behaviors: pd.DataFrame,
         max_history_len: int,
         neg_sampling_ratio: float,
+        include_usr_eng: Optional[bool] = False,
+        news_metrics_bucket: Optional[pd.DataFrame] = pd.DataFrame()
     ) -> None:
         self.news = news
         self.behaviors = behaviors
         self.max_history_len = max_history_len
         self.neg_sampling_ratio = neg_sampling_ratio
+        self.include_usr_eng = include_usr_eng
+        self.news_metrics_bucket = news_metrics_bucket
 
-    def __getitem__(
-        self, index: Any
-    ) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame, pd.DataFrame, np.ndarray]:
+    def __getitem__(self, index: Any) -> Tuple[
+        np.ndarray,
+        pd.DataFrame,
+        pd.DataFrame,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
         bhv = self.behaviors.iloc[index]
-
+        user = np.array([int(bhv["user"])])
         user_id = np.array([int(bhv["uid"].split("U")[-1])])
         user_idx = np.array([int(bhv["user"])])
-        history = np.array(bhv["history"])[: self.max_history_len]
-        candidates = np.array(bhv["candidates"])
         labels = np.array(bhv["labels"])
+        if isinstance(bhv["time"], str):
+            time = datetime.strptime(bhv["time"], "%Y-%m-%d %H:%M:%S")
+        else:
+            time = bhv["time"]
 
-        candidates, labels = self._sample_candidates(candidates, labels)
+        if self.include_usr_eng:
+            # -- Get History CTR
+            history_usr_eng = np.array(bhv["hist_usr_eng"])[
+                : self.max_history_len]
+            (
+                history,
+                history_ctr,
+                history_av,
+                history_av_idx,
+                history_epi,
+                history_epi_idx,
+                history_clk_ratio,
+            ) = zip(*history_usr_eng)
+            # -- Convert to np array
+            history = np.array(history)
+            history_ctr = np.array(history_ctr)
+            history_av = np.array(history_av)
+            history_av_idx = np.array(history_av_idx)
+            history_epi = np.array(history_epi)
+            history_epi_idx = np.array(history_epi_idx)
+            history_clk_ratio = np.array(history_clk_ratio)
+
+            # -- Get candidates CTR and Recency
+            candidates_ctr = np.array(bhv["cand_usr_eng"])
+            (
+                cand,
+                cand_ctr,
+                cand_rec,
+                cand_av,
+                cand_av_idx,
+                cand_epi,
+                cand_epi_idx,
+                cand_clk_ratio,
+            ) = zip(*candidates_ctr)
+            # Convert to np array
+            candidates = np.array(cand)
+            cand_ctr = np.array(cand_ctr)
+            cand_rec = np.array(cand_rec)
+            cand_av = np.array(cand_av)
+            cand_av_idx = np.array(cand_av_idx)
+            cand_epi = np.array(cand_epi)
+            cand_epi_idx = np.array(cand_epi_idx)
+            cand_clk_ratio = np.array(cand_clk_ratio)
+
+            candidates, labels, indices = self._sample_candidates(
+                candidates, labels)
+            # -- Select respective candidates values
+            candidates_ctr = cand_ctr[indices]
+            candidates_rec = cand_rec[indices]
+            candidates_av = cand_av[indices]
+            candidates_av_idx = cand_av_idx[indices]
+            candidates_epi = cand_epi[indices]
+            candidates_epi_idx = cand_epi_idx[indices]
+            candidates_clk_ratio = cand_clk_ratio[indices]
+
+        else:
+            history = np.array(bhv["history"])[: self.max_history_len]
+            candidates = np.array(bhv["candidates"])
+            candidates, labels, _ = self._sample_candidates(candidates, labels)
 
         history = self.news.loc[history]
         candidates = self.news.loc[candidates]
 
+        if self.include_usr_eng:
+            return (
+                user_id,
+                user_idx,
+                history,
+                candidates,
+                labels,
+                time,
+                history_ctr,
+                history_av_idx,
+                history_epi_idx,
+                history_clk_ratio,
+                candidates_ctr,
+                candidates_rec,
+                candidates_av,
+                candidates_av_idx,
+                candidates_epi,
+                candidates_epi_idx,
+                candidates_clk_ratio,
+            )
         return user_id, user_idx, history, candidates, labels
 
     def __len__(self) -> int:
         return len(self.behaviors)
 
     def _sample_candidates(
-        self, candidates: np.ndarray, labels: np.ndarray
+        self, 
+        candidates: np.ndarray,
+        labels: np.ndarray,
+        time: Optional[str] = None,
+        news_metrics_bucket: Optional[pd.DataFrame] = pd.DataFrame()
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Negative sampling of news candidates.
 
@@ -92,33 +183,186 @@ class RecommendationDatasetTrain(MINDDataFrame):
         candidates = candidates[indices]
         labels = labels[indices]
 
-        return candidates, labels
+        return candidates, labels, indices
+
+    def _initialize_cold_start(self):
+        """
+        In cold start cases, history can be empty thus we need to
+        add a dataframe with empty values for the embedding.
+        """
+        # Initialize an empty DataFrame with specified columns
+        history = pd.DataFrame(
+            columns=["title", "abstract", "sentiment_class", "sentiment_score"]
+        )
+        # Create a new DataFrame for the row you wish to append
+        new_row = pd.DataFrame(
+            [
+                {
+                    "title": "",
+                    "abstract": "",
+                    "sentiment_class": 0,
+                    "sentiment_score": 0.0,
+                }
+            ]
+        )
+        # Use pandas.concat to append the new row to the original DataFrame
+        history = pd.concat([history, new_row], ignore_index=True)
+        # Explicitly set the data types for the entire DataFrame
+        history = history.astype(
+            {
+                "title": "object",
+                "abstract": "object",
+                "sentiment_class": "int64",
+                "sentiment_score": "float64",
+            }
+        )
+        return history
 
 
 class RecommendationDatasetTest(MINDDataFrame):
-    def __init__(self, news: pd.DataFrame, behaviors: pd.DataFrame, max_history_len: int) -> None:
+    def __init__(
+        self,
+        news: pd.DataFrame,
+        behaviors: pd.DataFrame,
+        max_history_len: int,
+        include_usr_eng: Optional[bool] = False,
+    ) -> None:
         self.news = news
         self.behaviors = behaviors
         self.max_history_len = max_history_len
+        self.include_usr_eng = include_usr_eng
 
-    def __getitem__(
-        self, idx: Any
-    ) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame, pd.DataFrame, np.ndarray]:
+    def __getitem__(self, idx: Any) -> Tuple[
+        np.ndarray,
+        pd.DataFrame,
+        pd.DataFrame,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
         bhv = self.behaviors.iloc[idx]
-
         user_id = np.array([int(bhv["uid"].split("U")[-1])])
         user_idx = np.array([int(bhv["user"])])
-        history = np.array(bhv["history"])[: self.max_history_len]
-        candidates = np.array(bhv["candidates"])
         labels = np.array(bhv["labels"])
+        if isinstance(bhv["time"], str):
+            time = datetime.strptime(bhv["time"], "%Y-%m-%d %H:%M:%S")
+        else:
+            time = bhv["time"]
+
+        if self.include_usr_eng:
+            # -- Get History CTR
+            history_usr_eng = np.array(bhv["hist_usr_eng"])[
+                : self.max_history_len]
+            (
+                history,
+                history_ctr,
+                history_av,
+                history_av_idx,
+                history_epi,
+                history_epi_idx,
+                history_clk_ratio,
+            ) = zip(*history_usr_eng)
+            # -- Convert to np array
+            history = np.array(history)
+            history_ctr = np.array(history_ctr)
+            history_av = np.array(history_av)
+            history_av_idx = np.array(history_av_idx)
+            history_epi = np.array(history_epi)
+            history_epi_idx = np.array(history_epi_idx)
+            history_clk_ratio = np.array(history_clk_ratio)
+
+            # -- Get candidates CTR and Recency
+            candidates_usr_eng = np.array(bhv["cand_usr_eng"])
+            (
+                cand,
+                cand_ctr,
+                cand_rec,
+                cand_av,
+                cand_av_idx,
+                cand_epi,
+                cand_epi_idx,
+                cand_clk_ratio,
+            ) = zip(*candidates_usr_eng)
+            # Convert to np array
+            candidates = np.array(cand)
+            candidates_ctr = np.array(cand_ctr)
+            candidates_rec = np.array(cand_rec)
+            candidates_av = np.array(cand_av)
+            candidates_av_idx = np.array(cand_av_idx)
+            candidates_epi = np.array(cand_epi)
+            candidates_epi_idx = np.array(cand_epi_idx)
+            candidates_clk_ratio = np.array(cand_clk_ratio)
+
+        else:
+            history = np.array(bhv["history"])[: self.max_history_len]
+            candidates = np.array(bhv["candidates"])
 
         history = self.news.loc[history]
         candidates = self.news.loc[candidates]
+
+        if self.include_usr_eng:
+            return (
+                user_id,
+                user_idx,
+                history,
+                candidates,
+                labels,
+                time,
+                history_ctr,
+                history_av_idx,
+                history_epi_idx,
+                history_clk_ratio,
+                candidates_ctr,
+                candidates_rec,
+                candidates_av,
+                candidates_av_idx,
+                candidates_epi,
+                candidates_epi_idx,
+                candidates_clk_ratio,
+            )
 
         return user_id, user_idx, history, candidates, labels
 
     def __len__(self) -> int:
         return len(self.behaviors)
+
+    def _initialize_cold_start(self):
+        """
+        In cold start cases, history can be empty thus we need to
+        add a dataframe with empty values for the embedding.
+        """
+        # Initialize an empty DataFrame with specified columns
+        history = pd.DataFrame(
+            columns=["title", "abstract", "sentiment_class", "sentiment_score"]
+        )
+
+        # Create a new DataFrame for the row you wish to append
+        new_row = pd.DataFrame(
+            [
+                {
+                    "title": "",
+                    "abstract": "",
+                    "sentiment_class": 0,
+                    "sentiment_score": 0.0,
+                }
+            ]
+        )
+
+        # Use pandas.concat to append the new row to the original DataFrame
+        history = pd.concat([history, new_row], ignore_index=True)
+
+        # Explicitly set the data types for the entire DataFrame
+        history = history.astype(
+            {
+                "title": "object",
+                "abstract": "object",
+                "sentiment_class": "int64",
+                "sentiment_score": "float64",
+            }
+        )
+
+        return history
 
 
 @dataclass
@@ -131,6 +375,7 @@ class DatasetCollate:
         max_title_len: int,
         max_abstract_len: int,
         concatenate_inputs: bool,
+        include_usr_eng: Optional[bool] = False,
     ) -> None:
         self.dataset_attributes = dataset_attributes
         self.use_plm = use_plm
@@ -144,9 +389,81 @@ class DatasetCollate:
             self.tokenizer = tokenizer
 
         self.concatenate_inputs = concatenate_inputs
+        self.include_usr_eng = include_usr_eng
 
     def __call__(self, batch) -> RecommendationBatch:
-        user_ids, user_idx, histories, candidates, labels = zip(*batch)
+        if self.include_usr_eng:
+            (
+                user_ids,
+                user_idx,
+                histories,
+                candidates,
+                labels,
+                times,
+                histories_ctr,
+                histories_av_idx,
+                histories_epi_idx,
+                histories_clk_ratio,
+                candidates_ctr,
+                candidates_rec,
+                candidates_av,
+                candidates_av_idx,
+                candidates_epi,
+                candidates_epi_idx,
+                candidates_clk_ratio,
+            ) = zip(*batch)
+
+            # Flatten the array, convert to float, then to integer
+            histories_av_idx_flat = (
+                np.concatenate(histories_av_idx).astype(float).astype(np.int64)
+            )
+            histories_epi_idx_flat = (
+                np.concatenate(histories_epi_idx).astype(
+                    float).astype(np.int64)
+            )
+
+            histories_ctr = torch.from_numpy(
+                np.concatenate(histories_ctr).astype(np.int64)
+            ).long()
+            histories_av_idx = torch.from_numpy(histories_av_idx_flat).long()
+            histories_epi_idx = torch.from_numpy(histories_epi_idx_flat).long()
+            histories_clk_ratio = torch.from_numpy(
+                np.concatenate(histories_clk_ratio).astype(np.float16)
+            ).long()
+
+            # Flatten the array, convert to float, then to integer
+            candidates_av_idx_flat = (
+                np.concatenate(candidates_av_idx).astype(
+                    float).astype(np.int64)
+            )
+            candidates_epi_idx_flat = (
+                np.concatenate(candidates_epi_idx).astype(
+                    float).astype(np.int64)
+            )
+
+            candidates_ctr = torch.from_numpy(
+                np.concatenate(candidates_ctr).astype(np.int64)
+            ).long()
+            candidates_rec = torch.from_numpy(
+                np.concatenate(candidates_rec).astype(np.int64)
+            ).long()
+            candidates_av = torch.from_numpy(
+                np.concatenate(candidates_av).astype(np.float16)
+            ).long()
+            candidates_av_idx = torch.from_numpy(candidates_av_idx_flat).long()
+            candidates_epi = torch.from_numpy(
+                np.concatenate(candidates_epi).astype(np.float16)
+            ).long()
+            candidates_epi_idx = torch.from_numpy(
+                candidates_epi_idx_flat).long()
+            candidates_clk_ratio = torch.from_numpy(
+                np.concatenate(candidates_clk_ratio).astype(np.float16)
+            ).long()
+
+            times = self._get_timestamp(times)
+
+        else:
+            user_ids, user_idx, histories, candidates, labels = zip(*batch)
 
         batch_hist = self._make_batch_asignees(histories)
         batch_cand = self._make_batch_asignees(candidates)
@@ -157,22 +474,45 @@ class DatasetCollate:
         user_ids = torch.from_numpy(np.concatenate(user_ids)).long()
         user_idx = torch.from_numpy(np.concatenate(user_idx)).long()
 
-        return RecommendationBatch(
-            batch_hist=batch_hist,
-            batch_cand=batch_cand,
-            x_hist=x_hist,
-            x_cand=x_cand,
-            labels=labels,
-            user_ids=user_ids,
-            user_idx=user_idx,
-        )
+        if self.include_usr_eng:
+            return RecommendationBatch(
+                batch_hist=batch_hist,
+                batch_cand=batch_cand,
+                x_hist=x_hist,
+                x_cand=x_cand,
+                labels=labels,
+                user_ids=user_ids,
+                user_idx=user_idx,
+                times=times,
+                x_hist_ctr=histories_ctr,
+                x_hist_av_idx=histories_av_idx,
+                x_hist_epi_idx=histories_epi_idx,
+                x_hist_clk_ratio=histories_clk_ratio,
+                x_cand_ctr=candidates_ctr,
+                x_cand_rec=candidates_rec,
+                x_cand_av=candidates_av,
+                x_cand_av_idx=candidates_av_idx,
+                x_cand_epi=candidates_epi,
+                x_cand_epi_idx=candidates_epi_idx,
+                x_cand_clk_ratio=candidates_clk_ratio,
+            )
+        else:
+            return RecommendationBatch(
+                batch_hist=batch_hist,
+                batch_cand=batch_cand,
+                x_hist=x_hist,
+                x_cand=x_cand,
+                labels=labels,
+                user_ids=user_ids,
+                user_idx=user_idx,
+            )
 
     def _tokenize_embeddings(self, text: List[List[int]], max_len: Optional[int]) -> torch.Tensor:
         if max_len is None:
             max_len = max([len(item) for item in text])
 
         text_padded = [
-            F.pad(torch.tensor(item), (0, max_len - len(item)), "constant", 0) for item in text
+        F.pad(torch.tensor(item), (0, max_len - len(item)), "constant", 0) for item in text
         ]
 
         return torch.vstack(text_padded).long()
@@ -291,3 +631,23 @@ class DatasetCollate:
         batch = torch.repeat_interleave(torch.arange(len(items)), sizes)
 
         return batch
+    
+    def _get_timestamp(self, times: Sequence[str]) -> torch.Tensor:
+        """
+        Get a list of the format
+        (array('2019-11-14 07:01:48', dtype='<U19'), array('2019-11-14 08:38:04', dtype='<U19'))
+        and convert it into torch.Tensor
+        """
+        # Convert to list of datetime strings
+        datetime_strings = [str(date) for date in times]
+
+        # Step 1: Convert datetime strings to datetime objects
+        datetime_objects = pd.to_datetime(datetime_strings)
+
+        # Step 2: Convert datetime objects to POSIX timestamps
+        timestamps = datetime_objects.astype("int64") // 10**9
+
+        # Step 3: Create a PyTorch tensor from these timestamps
+        timestamps_tensor = torch.tensor(timestamps)
+
+        return timestamps_tensor

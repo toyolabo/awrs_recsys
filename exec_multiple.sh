@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# --- 1st run
+python newsreclib/train.py experiment=awrs_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=nrms_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=naml_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=lsturini_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=tanr_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=sentirec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=miner_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=mins_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=cennewsrec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=manner_cr_module_mindsmall_plm_supconloss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=caum_mindsmall_plm_celoss_bertsent || echo "train failed"
+
+# --- 2nd run
+python newsreclib/train.py experiment=awrs_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=nrms_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=naml_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=lsturini_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=tanr_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=sentirec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=miner_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=mins_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=cennewsrec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=manner_cr_module_mindsmall_plm_supconloss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=caum_mindsmall_plm_celoss_bertsent || echo "train failed"
+
+# --- 3rd run
+python newsreclib/train.py experiment=awrs_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=nrms_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=naml_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=lsturini_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=tanr_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=sentirec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=miner_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=mins_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=cennewsrec_mindsmall_plm_celoss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=manner_cr_module_mindsmall_plm_supconloss_bertsent || echo "train failed"
+python newsreclib/train.py experiment=caum_mindsmall_plm_celoss_bertsent || echo "train failed"

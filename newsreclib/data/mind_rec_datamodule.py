@@ -101,6 +101,8 @@ class MINDRecDataModule(LightningDataModule):
              If ``True``, the data loader will copy Tensors into device/CUDA pinned memory before returning them. If your data elements are a custom type, or your collate_fn returns a batch that is a custom type, see the example below.
         drop_last:
              Set to ``True`` to drop the last incomplete batch, if the dataset size is not divisible by the batch size. If ``False`` and the size of dataset is not divisible by the batch size, then the last batch will be smaller.
+        include_usr_eng:
+            Controling if we should include user engagement information or not into history/candidates
     """
 
     def __init__(
@@ -135,6 +137,8 @@ class MINDRecDataModule(LightningDataModule):
         num_workers: int,
         pin_memory: bool,
         drop_last: bool,
+        include_usr_eng: Optional[bool],
+        matrix_size: Optional[int],
     ) -> None:
         super().__init__()
 
@@ -187,6 +191,8 @@ class MINDRecDataModule(LightningDataModule):
             train=True,
             validation=False,
             download=True,
+            include_usr_eng=self.hparams.include_usr_eng,
+            matrix_size=self.hparams.matrix_size
         )
 
         # download validation set
@@ -212,6 +218,8 @@ class MINDRecDataModule(LightningDataModule):
             train=False,
             validation=False,
             download=True,
+            include_usr_eng=self.hparams.include_usr_eng,
+            matrix_size=self.hparams.matrix_size,
         )
 
     def setup(self, stage: Optional[str] = None):
@@ -244,6 +252,8 @@ class MINDRecDataModule(LightningDataModule):
                 train=True,
                 validation=False,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                matrix_size=self.hparams.matrix_size,
             )
             validset = MINDDataFrame(
                 dataset_size=self.hparams.dataset_size,
@@ -267,6 +277,8 @@ class MINDRecDataModule(LightningDataModule):
                 train=True,
                 validation=True,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                matrix_size=self.hparams.matrix_size,
             )
             testset = MINDDataFrame(
                 dataset_size=self.hparams.dataset_size,
@@ -290,6 +302,8 @@ class MINDRecDataModule(LightningDataModule):
                 train=False,
                 validation=False,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                matrix_size=self.hparams.matrix_size,
             )
 
             self.data_train = RecommendationDatasetTrain(
@@ -297,16 +311,20 @@ class MINDRecDataModule(LightningDataModule):
                 behaviors=trainset.behaviors,
                 max_history_len=self.hparams.max_history_len,
                 neg_sampling_ratio=self.hparams.neg_sampling_ratio,
+                include_usr_eng=self.hparams.include_usr_eng,
             )
             self.data_val = RecommendationDatasetTest(
                 news=validset.news,
                 behaviors=validset.behaviors,
                 max_history_len=self.hparams.max_history_len,
+                include_usr_eng=self.hparams.include_usr_eng,
             )
             self.data_test = RecommendationDatasetTest(
                 news=testset.news,
                 behaviors=testset.behaviors,
                 max_history_len=self.hparams.max_history_len,
+                include_usr_eng=self.hparams.include_usr_eng,
+                
             )
 
     def train_dataloader(self):
@@ -320,6 +338,7 @@ class MINDRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len if not self.hparams.use_plm else None,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=True,
             num_workers=self.hparams.num_workers,
@@ -338,6 +357,7 @@ class MINDRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=False,
             num_workers=self.hparams.num_workers,
@@ -356,6 +376,7 @@ class MINDRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len if not self.hparams.use_plm else None,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=False,
             num_workers=self.hparams.num_workers,
