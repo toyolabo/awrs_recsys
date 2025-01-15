@@ -21,13 +21,16 @@ import newsreclib.data.components.file_utils as file_utils
 from newsreclib import utils
 from newsreclib.data.components.adressa_user_info import UserInfo
 
+from newsreclib.data.components.get_metrics import get_news_metrics_bucket
+from newsreclib.data.components.get_ctr_usr_eng import _get_usr_eng
+
 tqdm.pandas()
 
 log = utils.get_pylogger(__name__)
 
 
 class AdressaDataFrame(Dataset):
-    """Creates a dataframe for the MIND dataset.
+    """Creates a dataframe for the Adressa dataset.
 
     Additionally:
         - Downloads the dataset for the specified size.
@@ -98,12 +101,17 @@ class AdressaDataFrame(Dataset):
         categ_embed_dim: Optional[int],
         sentiment_annotator: nn.Module,
         train_date_split: str,
+        val_date_split: str,
         test_date_split: str,
         neg_num: int,
         user_dev_size: float,
         train: bool,
         validation: bool,
         download: bool,
+        file_type: Optional[bool] = "acc",
+        include_usr_eng: Optional[bool] = False,
+        pop_k: Optional[int] = 0,
+        matrix_size: Optional[int] = 5,
     ) -> None:
         super().__init__()
 
@@ -114,8 +122,14 @@ class AdressaDataFrame(Dataset):
         self.dataset_attributes = dataset_attributes
         self.id2index_filenames = id2index_filenames
 
+        self.include_usr_eng = include_usr_eng
+        self.file_type = file_type
+
+        self.pop_k = pop_k
+
         self.use_plm = use_plm
         self.use_pretrained_categ_embeddings = use_pretrained_categ_embeddings
+        self.matrix_size = matrix_size
 
         if not self.use_plm or self.use_pretrained_categ_embeddings:
             assert isinstance(word_embed_dim, int)
@@ -128,6 +142,7 @@ class AdressaDataFrame(Dataset):
         self.sentiment_annotator = sentiment_annotator
 
         self.train_date_split = train_date_split
+        self.val_date_split = val_date_split
         self.test_date_split = test_date_split
         self.neg_num = neg_num
         self.user_dev_size = user_dev_size
@@ -184,6 +199,19 @@ class AdressaDataFrame(Dataset):
 
         self.news, self.behaviors = self.load_data()
 
+        if self.pop_k > 0:
+            if self.file_type == "acc":
+                news_metrics_bucket = pd.read_pickle('./data/Adressa_one_week_metrics_bucket/adressa_news_metrics_bucket_acc.pkl')
+                news_metrics_bucket['time_bucket_start_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_start_hour'], format='%Y-%m-%d %H:%M:%S')
+                news_metrics_bucket['time_bucket_end_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_end_hour'], format='%Y-%m-%d %H:%M:%S')
+            elif self.file_type == "ptb":
+                news_metrics_bucket = pd.read_pickle('./data/Adressa_one_week_metrics_bucket/adressa_news_metrics_bucket_ptb.pkl')
+                news_metrics_bucket['time_bucket_start_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_start_hour'], format='%Y-%m-%d %H:%M:%S')
+                news_metrics_bucket['time_bucket_end_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_end_hour'], format='%Y-%m-%d %H:%M:%S')
+            self.news_metrics_bucket = news_metrics_bucket
+        else:
+            self.news_metrics_bucket = None
+
     def __getitem__(self, index) -> Tuple[Any, Any, Any]:
         user_bhv = self.behaviors.iloc[index]
 
@@ -213,6 +241,10 @@ class AdressaDataFrame(Dataset):
         log.info(
             f"Behaviors data size for data split {self.data_split}, validation={self.validation}: {len(behaviors)}"
         )
+
+        if self.include_usr_eng:
+            unique_ids_news = news.index.unique().tolist()
+            behaviors = self._load_behaviors_extra(behaviors, unique_ids_news, self.file_type)
 
         return news, behaviors
 
@@ -246,10 +278,10 @@ class AdressaDataFrame(Dataset):
 
             if not file_utils.check_integrity(raw_news_filepath):
                 log.info("Compressed files not processed. Reading news data.")
-                news_title, news_category, news_subcategory, nid2index = self._process_news_files(
+                news_title, news_category, news_subcategory, news_publish_time, nid2index = self._process_news_files(
                     os.path.join(self.data_dir, self.adressa_gzip_filename)
                 )
-                self._write_news_files(news_title, news_category, news_subcategory, nid2index)
+                self._write_news_files(news_title, news_category, news_subcategory, news_publish_time, nid2index)
 
                 news_title_df = pd.DataFrame(news_title.items(), columns=["id", "title"])
                 file_utils.to_tsv(news_title_df, os.path.join(self.dst_dir, "news_title.tsv"))
@@ -260,7 +292,7 @@ class AdressaDataFrame(Dataset):
                 )
 
             log.info("Processing data.")
-            columns_names = ["nid", "category", "subcategory", "title"]
+            columns_names = ["nid", "category", "subcategory", "title", "publish_time"]
             news = pd.read_table(
                 filepath_or_buffer=raw_news_filepath,
                 header=None,
@@ -291,6 +323,10 @@ class AdressaDataFrame(Dataset):
             subcateg2index_fpath = os.path.join(
                 self.dst_dir,
                 self.id2index_filenames["subcateg2index"],
+            )
+            publishtime2index_fpath = os.path.join(
+                self.dst_dir,
+                self.id2index_filenames["publishtime2index"],
             )
 
             if (
@@ -347,6 +383,18 @@ class AdressaDataFrame(Dataset):
             file_utils.to_tsv(
                 df=pd.DataFrame(subcateg2index.items(), columns=["subcategory", "index"]),
                 fpath=subcateg2index_fpath,
+            )
+
+            # publishtime2index map
+            log.info("Constructing publishtime2index map.")
+            news_publish_time = news["publish_time"].drop_duplicates().reset_index(drop=True)
+            publishtime2index = {v: k + 1 for k, v in news_publish_time.to_dict().items()}
+            log.info(
+                f"Savinf publishtime2index map of size {len(publishtime2index)} in {publishtime2index_fpath}"
+            )
+            file_utils.to_tsv(
+                df=pd.DataFrame(publishtime2index.items(), columns=["publish_time", "index"]),
+                fpath=publishtime2index_fpath,
             )
 
             # compute sentiment classes
@@ -428,6 +476,9 @@ class AdressaDataFrame(Dataset):
 
         return news
 
+    def convert_timestamp(self, timestamp):
+        return datetime.fromtimestamp(timestamp)
+
     def _load_behaviors(self) -> pd.DataFrame:
         """Loads the parsed user behaviors. If not already parsed, loads and parses the raw
         behavior data.
@@ -449,6 +500,7 @@ class AdressaDataFrame(Dataset):
                     "candidates": lambda x: x.strip("[]").replace("'", "").split(", "),
                     "labels": lambda x: list(map(int, x.strip("[]").split(", "))),
                 },
+                # nrows=100
             )
 
         else:
@@ -477,27 +529,45 @@ class AdressaDataFrame(Dataset):
 
                 log.info("Constructing behaviors.")
                 self.train_lines = []
+                self.val_lines = []
                 self.test_lines = []
                 for uid in tqdm(user_info):
                     uinfo = user_info[uid]
                     train_news = uinfo.train_news
+                    train_time = uinfo.train_time
+                    val_news = uinfo.val_news
+                    val_time = uinfo.val_time
                     test_news = uinfo.test_news
+                    test_time = uinfo.test_time
                     hist_news = uinfo.hist_news
-                    self._construct_behaviors(uid, hist_news, train_news, test_news, news_title)
+                    hist_time = uinfo.hist_time
+                    self._construct_behaviors(
+                        uid, 
+                        hist_news,
+                        hist_time, 
+                        train_news,
+                        train_time, 
+                        val_news,
+                        val_time, 
+                        test_news, 
+                        test_time,
+                        news_title, 
+                    )
 
                 shuffle(self.train_lines)
+                shuffle(self.val_lines)
                 shuffle(self.test_lines)
 
-                test_split_lines, dev_split_lines = train_test_split(
-                    self.test_lines, test_size=self.user_dev_size, random_state=self.seed
-                )
+                # test_split_lines, dev_split_lines = train_test_split(
+                #     self.test_lines, test_size=self.user_dev_size, random_state=self.seed
+                # )
 
                 self._write_behavior_files(self.train_lines, "train")
-                self._write_behavior_files(dev_split_lines, "dev")
-                self._write_behavior_files(test_split_lines, "test")
+                self._write_behavior_files(self.val_lines, "dev")
+                self._write_behavior_files(self.test_lines, "test")
 
             log.info("Compressed files read. Processing data.")
-            columns_names = ["uid", "history", "impressions"]
+            columns_names = ["uid", "history", "time", "impressions"]
             behaviors = pd.read_table(
                 filepath_or_buffer=os.path.join(
                     self.dst_dir_stage, "behaviors_" + str(self.seed) + ".tsv"
@@ -508,7 +578,7 @@ class AdressaDataFrame(Dataset):
                 low_memory=False,
             )
 
-            behaviors["uid"] = behaviors["uid"].apply(lambda x: "U" + str(x))
+            # behaviors["uid"] = behaviors["uid"].apply(lambda x: "U" + str(x))
             behaviors["history"] = behaviors["history"].fillna("").str.split()
             behaviors["impressions"] = behaviors["impressions"].str.split()
             behaviors["candidates"] = behaviors["impressions"].apply(
@@ -558,13 +628,89 @@ class AdressaDataFrame(Dataset):
             log.info("Mapping uid to index.")
             behaviors["user"] = behaviors["uid"].apply(lambda x: uid2index.get(x, 0))
 
-            behaviors = behaviors[["uid", "user", "history", "candidates", "labels"]]
+            behaviors = behaviors[["uid", "user", "history", "candidates", "labels", "time"]]
+            behaviors["time"] = behaviors["time"].apply(self.convert_timestamp)
 
             # cache processed data
             log.info(
                 f"Caching parsed behaviors of size {len(behaviors)} to {parsed_behaviors_file}."
             )
             file_utils.to_tsv(behaviors, parsed_behaviors_file)
+
+        return behaviors
+
+    def get_est_publish_time(self):
+        pbt_path = os.path.join(self.data_dir, "Adressa_" + self.dataset_size, "publishtime2index.tsv")
+        if file_utils.check_integrity(pbt_path):
+            df = pd.read_table(pbt_path)
+            df['publish_time'] = pd.to_datetime(df['publish_time'], utc=True)
+            df['publish_time'] = df['publish_time'].dt.tz_localize(None)
+            df['nid'] = "N" + df['index'].astype(str)
+            return dict(zip(df['nid'], df['publish_time']))
+        raise ValueError("Couldn't load publishtime dictionary.")
+
+    def _load_behaviors_extra(self, behaviors: pd.DataFrame, unique_ids: list, file_type: str) -> pd.DataFrame:
+        """ Load the parsed behaviors with extra information (CTR or User Engagement).
+        If it does not already have the information of CTR or User Engagement load it.
+        """
+        # Check if behaviors file with extra information already exists
+        
+        if self.include_usr_eng:
+            parsed_bhv_file_ = os.path.join(
+                self.dst_dir, self.data_split, "parsed_behaviors_42_usr_eng.tsv")
+
+        if file_utils.check_integrity(parsed_bhv_file_):
+            log.info("Extra information has already been added.")
+            # behaviors already parsed
+            log.info(
+                f"User behaviors already parsed. Loading from {parsed_bhv_file_}.")
+            if not self.include_usr_eng:
+                behaviors = pd.read_table(
+                    filepath_or_buffer=parsed_bhv_file_,
+                    converters={
+                        "history": lambda x: x.strip("[]").replace("'", "").split(", "),
+                        "candidates": lambda x: x.strip("[]").replace("'", "").split(", "),
+                        "labels": lambda x: list(map(int, x.strip("[]").split(", "))),
+                        "history_ctr": lambda x: literal_eval(x),
+                        "candidates": lambda x: literal_eval(x),
+                        "cand_num_clicks": lambda x: literal_eval(x),
+                        "candidates_ctr": lambda x: literal_eval(x),
+                    },
+                    # nrows=100
+                )
+            else:
+                behaviors = pd.read_table(
+                    filepath_or_buffer=parsed_bhv_file_,
+                    converters={
+                        "history": lambda x: literal_eval(x),
+                        "hist_usr_eng": lambda x: literal_eval(x),
+                        "candidates": lambda x: literal_eval(x),
+                        "cand_usr_eng": lambda x: literal_eval(x),
+                        "cand_ctr": lambda x: literal_eval(x),
+                        "labels": lambda x: list(map(int, x.strip("[]").split(", "))),
+                    },
+                    # nrows=100
+                )
+        else:
+            # Get pickle file for estimated publish time
+            log.info('Loading news articles publish time...')
+            article2published = self.get_est_publish_time()
+            log.info('News articles publish time loaded.')
+            # Load news metrics bucket file
+            news_metrics_bucket = self._load_news_metrics_bucket(article2published, file_type)
+
+            log.info("Adding CTR information into behaviors file...")
+            if self.include_usr_eng:
+                # Parse behaviors to add user engagement information
+                behaviors = _get_usr_eng(
+                    article2published=article2published, 
+                    behaviors=behaviors, 
+                    news_metrics_bucket=news_metrics_bucket
+                )
+
+            # Save behaviors file with ctr information
+            file_utils.to_tsv(behaviors, parsed_bhv_file_)
+            log.info("Extra information added to behaviors file!")
 
         return behaviors
 
@@ -579,6 +725,7 @@ class AdressaDataFrame(Dataset):
         news_title = {}
         news_category = {}
         news_subcategory = {}
+        news_publish_time = {}
 
         tar = tarfile.open(filepath, "r:gz", encoding="utf-8")
         files = tar.getmembers()
@@ -590,7 +737,7 @@ class AdressaDataFrame(Dataset):
                     line = line.decode("utf-8")
                     event_dict = json.loads(line.strip("\n"))
 
-                    if "id" in event_dict and "title" in event_dict and "category1" in event_dict:
+                    if "id" in event_dict and "title" in event_dict and "category1" in event_dict and "publishtime" in event_dict:
                         if event_dict["id"] not in news_title:
                             news_title[event_dict["id"]] = event_dict["title"]
                         else:
@@ -613,18 +760,25 @@ class AdressaDataFrame(Dataset):
                                 news_subcategory[event_dict["id"]]
                                 == event_dict["category1"].split("|")[-1]
                             )
+                            
+                        if event_dict["id"] not in news_publish_time:
+                            news_publish_time[event_dict["id"]] = event_dict["publishtime"]
+                        else:
+                            assert news_publish_time[event_dict["id"]] == event_dict["publishtime"]
+                            
 
         nid2index = {
             k: "N" + str(v) for k, v in zip(news_title.keys(), range(1, len(news_title) + 1))
         }
 
-        return news_title, news_category, news_subcategory, nid2index
+        return news_title, news_category, news_subcategory, news_publish_time, nid2index
 
     def _write_news_files(
         self,
         news_title: Dict[str, str],
         news_category: Dict[str, str],
         news_subcategory: Dict[str, str],
+        news_publish_time: Dict[str, str],
         nid2index: Dict[str, int],
     ) -> None:
         """Writes news to the file.
@@ -639,7 +793,8 @@ class AdressaDataFrame(Dataset):
             title = news_title[nid]
             category = news_category[nid]
             subcategory = news_subcategory[nid]
-            news_line = "\t".join([str(nindex), category, subcategory, title]) + "\n"
+            publish_time = news_publish_time[nid]
+            news_line = "\t".join([str(nindex), category, subcategory, title, publish_time]) + "\n"
             news_lines.append(news_line)
 
         for stage in ["train", "dev", "test"]:
@@ -658,7 +813,11 @@ class AdressaDataFrame(Dataset):
         https://github.com/yjw1029/Efficient-FedRec/blob/839f967c1ed1c0cb0b1b4d670828437ffb712f29/preprocess/adressa_raw.py
         """
         uid2index = {}
-        user_info = defaultdict(lambda: UserInfo(self.train_date_split, self.test_date_split))
+        user_info = defaultdict(lambda: UserInfo(
+            train_date_split=self.train_date_split, 
+            val_date_split=self.val_date_split,
+            test_date_split=self.test_date_split
+        ))
 
         tar = tarfile.open(filepath, "r:gz", encoding="utf-8")
         files = tar.getmembers()
@@ -684,50 +843,80 @@ class AdressaDataFrame(Dataset):
                         user_index = "U" + str(uid2index[uid])
                         click_time = int(event_dict["time"])
                         if self.dataset_size == "one_week":
-                            date = int(file.name[-1])
+                            date = datetime.utcfromtimestamp(click_time)
                         else:
                             date = datetime.utcfromtimestamp(click_time).isocalendar()[1]
                         user_info[user_index].update(nindex, click_time, date)
 
         return uid2index, user_info
 
-    def _construct_behaviors(self, uid, hist_news, train_news, test_news, news_title) -> None:
+    def _construct_behaviors(
+            self, 
+            uid, 
+            hist_news, 
+            hist_time, 
+            train_news, 
+            train_time, 
+            val_news, 
+            val_time, 
+            test_news, 
+            test_time, 
+            news_title
+        ) -> None:
         probs = np.ones(len(news_title) + 1, dtype="float32")
 
         hist_news_indices = [int(news.split("N")[-1]) for news in hist_news]
         train_news_indices = [int(news.split("N")[-1]) for news in train_news]
+        val_news_indices = [int(news.split("N")[-1]) for news in val_news]
         test_news_indices = [int(news.split("N")[-1]) for news in test_news]
 
         probs[hist_news_indices] = 0
         probs[train_news_indices] = 0
+        probs[val_news_indices] = 0
         probs[test_news_indices] = 0
 
         probs[0] = 0
         probs /= probs.sum()
 
         train_hist_line = " ".join(hist_news.tolist())
+        train_cand_time = train_time.tolist()
+        val_cand_time = val_time.tolist()
+        test_cand_time = test_time.tolist()
 
-        for nindex in train_news:
+        for idx, nindex in enumerate(train_news):
             neg_cand = np.random.choice(
                 len(news_title) + 1, size=self.neg_num, replace=False, p=probs
             ).tolist()
             neg_cand = ["N" + str(cand) for cand in neg_cand]
             cand_news = " ".join([f"{nindex}-1"] + [f"{nindex}-0" for nindex in neg_cand])
 
-            train_behavior_line = f"{uid}\t{train_hist_line}\t{cand_news}\n"
+            train_behavior_line = f"{uid}\t{train_hist_line}\t{str(train_cand_time[idx])}\t{cand_news}\n"
             self.train_lines.append(train_behavior_line)
 
-        test_hist_news = hist_news.tolist() + train_news.tolist()
-        test_hist_line = " ".join(test_hist_news)
+        val_hist_news = hist_news.tolist() + train_news.tolist()
+        val_hist_line = " ".join(val_hist_news)
 
-        for nindex in test_news:
+        for idx, nindex in enumerate(val_news):
             neg_cand = np.random.choice(
                 len(news_title) + 1, size=self.neg_num, replace=False, p=probs
             ).tolist()
             neg_cand = ["N" + str(cand) for cand in neg_cand]
             cand_news = " ".join([f"{nindex}-1"] + [f"{nindex}-0" for nindex in neg_cand])
 
-            test_behavior_line = f"{uid}\t{test_hist_line}\t{cand_news}\n"
+            val_behavior_line = f"{uid}\t{val_hist_line}\t{str(val_cand_time[idx])}\t{cand_news}\n"
+            self.val_lines.append(val_behavior_line)
+
+        test_hist_news = hist_news.tolist() + val_news.tolist() + train_news.tolist()
+        test_hist_line = " ".join(test_hist_news)
+
+        for idx, nindex in enumerate(test_news):
+            neg_cand = np.random.choice(
+                len(news_title) + 1, size=self.neg_num, replace=False, p=probs
+            ).tolist()
+            neg_cand = ["N" + str(cand) for cand in neg_cand]
+            cand_news = " ".join([f"{nindex}-1"] + [f"{nindex}-0" for nindex in neg_cand])
+
+            test_behavior_line = f"{uid}\t{test_hist_line}\t{test_cand_time[idx]}\t{cand_news}\n"
             self.test_lines.append(test_behavior_line)
 
     def _write_behavior_files(self, behavior_lines, stage: str) -> None:
@@ -736,3 +925,138 @@ class AdressaDataFrame(Dataset):
             os.path.join(filepath, "behaviors_" + str(self.seed) + ".tsv"), "w", encoding="utf-8"
         ) as f:
             f.writelines(behavior_lines)
+        
+    # Convert the 'impressions' column into a more manageable format
+    def parse_impressions(self, impressions):
+        """Parse the impressions string into a list of tuples (news_id, clicked)."""
+        return [imp.split('-') for imp in impressions]    
+    
+    def get_bucket(self, time):
+        """Get the equivalent time bucket for the specific time 
+        object received as an input.
+        """
+        # Convert the input string to a datetime object
+        if isinstance(time, (int, float)):
+            time = datetime.fromtimestamp(time)
+        elif isinstance(time, str):
+            time = datetime.strptime(time, '%Y-%m-%d %H:%M:%S')
+
+        # Define the format to include day, month, year, and hour
+        date_hour_format = '%m/%d/%Y %H:00'  # Adjusted to match your input format
+
+        # Start of the hour for the given time
+        start_hour = time.replace(minute=0, second=0, microsecond=0)
+
+        # End of the hour (start of the next hour)
+        end_hour = start_hour + pd.Timedelta(hours=1)
+
+        # Format the time bucket string
+        bucket_str = f"{start_hour.strftime(date_hour_format)} to {end_hour.strftime('%H:00')}"
+
+        # Return both the bucket string and the end_hour as a datetime object
+        return bucket_str, start_hour, end_hour
+    
+    def extract_bucket_info(self, row):
+        """Extracts information for each impression."""
+        article_set = set()  # make sure we don't process any news article twice for same impression
+        user_id = row["uid"]
+        time = row["time"]
+        for news_id, clicked in row['impressions_split']:
+            if news_id not in article_set:
+                article_set.add(news_id)
+                time_bucket, time_bucket_start_hour, time_bucket_end_hour = self.get_bucket(time)
+                yield {
+                    'time_bucket': time_bucket,
+                    'time_bucket_start_hour': time_bucket_start_hour,
+                    'time_bucket_end_hour': time_bucket_end_hour,
+                    'news_id': news_id,
+                    'clicked': int(clicked),
+                    'user_id': user_id
+                }
+
+    def _load_news_metrics_bucket(self, article2published: pd.DataFrame, file_type: str):
+        """
+        News Metric Bucket - nmb
+
+        Get a dataframe that reports news article news_metrics_bucket per time bucket.
+
+        This dataframe needs to be calculated considering both train and dev dataframes.
+        We're simulating a near real time information.
+        """
+        path_folder = os.path.join(self.data_dir, "Adressa_" + self.dataset_size + "_metrics_bucket")
+        # Ensure the folder exists
+        os.makedirs(path_folder, exist_ok=True)
+
+        path_bucket = os.path.join(path_folder, "adressa_news_bucket.tsv")
+
+        path_behaviors_train = os.path.join(
+            self.data_dir, "Adressa_" + self.dataset_size + "/train/" + "behaviors_42.tsv"
+        )
+        path_behaviors_dev = os.path.join(
+            self.data_dir, "Adressa_" + self.dataset_size + "/dev/" + "behaviors_42.tsv"
+        )
+        path_behaviors_test = os.path.join(
+            self.data_dir, "Adressa_" + self.dataset_size + "/test/" + "behaviors_42.tsv"
+        )
+        
+        if file_type == "ptb":
+            path = os.path.join(path_folder, "adressa_news_metrics_bucket_ptb.pkl")
+        else:
+            path = os.path.join(path_folder, "adressa_news_metrics_bucket_acc.pkl")
+
+        if not file_utils.check_integrity(path_bucket):
+            log.info(f"Creating news metric bucket type ${file_type} file...")
+            # Load train behaviors
+            behaviors_train = pd.read_table(
+                filepath_or_buffer=path_behaviors_train,
+                header=None,
+                names=["uid", "clicked_news", "time", "impressions"],
+            )
+
+            # Load dev behaviors
+            behaviors_dev = pd.read_table(
+                filepath_or_buffer=path_behaviors_dev,
+                header=None,
+                names=["uid", "clicked_news", "time", "impressions"],
+            )
+
+            # Load test behaviors
+            behaviors_test = pd.read_table(
+                filepath_or_buffer=path_behaviors_test,
+                header=None,
+                names=["uid", "clicked_news", "time", "impressions"],
+            )
+
+            # Join the two behaviors
+            behaviors = pd.concat([behaviors_train, behaviors_dev, behaviors_test])
+            behaviors.clicked_news = behaviors.clicked_news.fillna(" ")
+            behaviors.impressions = behaviors.impressions.str.split()
+
+            # Let's join the candidates column to make it easier
+            # Let's split impressions column to make it easier
+            behaviors['impressions_split'] = behaviors['impressions'].apply(self.parse_impressions)
+
+            # Apply the function and create a new DataFrame
+            bucket_info = pd.DataFrame(
+                [info for _, row in tqdm(behaviors.iterrows(), total=len(behaviors)) for info in self.extract_bucket_info(row)]
+            )
+
+            # Save bucket info
+            file_utils.to_tsv(bucket_info, path_bucket)
+            log.info("News bucket info file created!")
+        else:
+            bucket_info = pd.read_table(path_bucket)
+
+        if not file_utils.check_integrity(path):
+            news_metrics_bucket = get_news_metrics_bucket(
+                file_type=file_type,
+                bucket_info=bucket_info,
+                path=path,
+                article2published=article2published,
+                matrix_size=self.matrix_size,
+            )
+        else:
+            log.info("News metric bucket file already created!")
+            news_metrics_bucket = pd.read_pickle(path)
+
+        return news_metrics_bucket

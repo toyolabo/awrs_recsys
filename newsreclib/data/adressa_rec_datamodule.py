@@ -120,6 +120,7 @@ class AdressaRecDataModule(LightningDataModule):
         word_embed_dim: Optional[int],
         sentiment_annotator: nn.Module,
         train_date_split: str,
+        val_date_split: str,
         test_date_split: str,
         neg_num: int,
         user_dev_size: float,
@@ -135,6 +136,9 @@ class AdressaRecDataModule(LightningDataModule):
         num_workers: int,
         pin_memory: bool,
         drop_last: bool,
+        include_usr_eng: Optional[bool],
+        pop_k: Optional[int],
+        matrix_size: Optional[int],
     ) -> None:
         super().__init__()
 
@@ -181,12 +185,15 @@ class AdressaRecDataModule(LightningDataModule):
             word_embed_dim=self.hparams.word_embed_dim,
             sentiment_annotator=self.hparams.sentiment_annotator,
             train_date_split=self.hparams.train_date_split,
+            val_date_split=self.hparams.val_date_split,
             test_date_split=self.hparams.test_date_split,
             neg_num=self.hparams.neg_num,
             user_dev_size=self.hparams.user_dev_size,
             train=True,
             validation=False,
             download=True,
+            include_usr_eng=self.hparams.include_usr_eng,
+            matrix_size=self.hparams.matrix_size,
         )
 
         # download validation set
@@ -206,12 +213,15 @@ class AdressaRecDataModule(LightningDataModule):
             word_embed_dim=self.hparams.word_embed_dim,
             sentiment_annotator=self.hparams.sentiment_annotator,
             train_date_split=self.hparams.train_date_split,
+            val_date_split=self.hparams.val_date_split,
             test_date_split=self.hparams.test_date_split,
             neg_num=self.hparams.neg_num,
             user_dev_size=self.hparams.user_dev_size,
             train=False,
             validation=False,
             download=True,
+            include_usr_eng=self.hparams.include_usr_eng,
+            pop_k=self.hparams.pop_k
         )
 
     def setup(self, stage: Optional[str] = None):
@@ -238,12 +248,16 @@ class AdressaRecDataModule(LightningDataModule):
                 word_embed_dim=self.hparams.word_embed_dim,
                 sentiment_annotator=self.hparams.sentiment_annotator,
                 train_date_split=self.hparams.train_date_split,
+                val_date_split=self.hparams.val_date_split,
                 test_date_split=self.hparams.test_date_split,
                 neg_num=self.hparams.neg_num,
                 user_dev_size=self.hparams.user_dev_size,
                 train=True,
                 validation=False,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                pop_k=self.hparams.pop_k,
+                matrix_size=self.hparams.matrix_size
             )
             validset = AdressaDataFrame(
                 seed=self.hparams.seed,
@@ -261,12 +275,16 @@ class AdressaRecDataModule(LightningDataModule):
                 word_embed_dim=self.hparams.word_embed_dim,
                 sentiment_annotator=self.hparams.sentiment_annotator,
                 train_date_split=self.hparams.train_date_split,
+                val_date_split=self.hparams.val_date_split,
                 test_date_split=self.hparams.test_date_split,
                 neg_num=self.hparams.neg_num,
                 user_dev_size=self.hparams.user_dev_size,
                 train=True,
                 validation=True,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                pop_k=self.hparams.pop_k,
+                matrix_size=self.hparams.matrix_size
             )
             testset = AdressaDataFrame(
                 seed=self.hparams.seed,
@@ -284,12 +302,16 @@ class AdressaRecDataModule(LightningDataModule):
                 word_embed_dim=self.hparams.word_embed_dim,
                 sentiment_annotator=self.hparams.sentiment_annotator,
                 train_date_split=self.hparams.train_date_split,
+                val_date_split=self.hparams.val_date_split,
                 test_date_split=self.hparams.test_date_split,
                 neg_num=self.hparams.neg_num,
                 user_dev_size=self.hparams.user_dev_size,
                 train=False,
                 validation=False,
                 download=False,
+                include_usr_eng=self.hparams.include_usr_eng,
+                pop_k=self.hparams.pop_k,
+                matrix_size=self.hparams.matrix_size
             )
 
             self.data_train = RecommendationDatasetTrain(
@@ -297,16 +319,21 @@ class AdressaRecDataModule(LightningDataModule):
                 behaviors=trainset.behaviors,
                 max_history_len=self.hparams.max_history_len,
                 neg_sampling_ratio=self.hparams.neg_sampling_ratio,
+                include_usr_eng=self.hparams.include_usr_eng,
+                pop_k=self.hparams.pop_k,
+                news_metrics_bucket=trainset.news_metrics_bucket
             )
             self.data_val = RecommendationDatasetTest(
                 news=validset.news,
                 behaviors=validset.behaviors,
                 max_history_len=self.hparams.max_history_len,
+                include_usr_eng=self.hparams.include_usr_eng,
             )
             self.data_test = RecommendationDatasetTest(
                 news=testset.news,
                 behaviors=testset.behaviors,
                 max_history_len=self.hparams.max_history_len,
+                include_usr_eng=self.hparams.include_usr_eng,
             )
 
     def train_dataloader(self):
@@ -320,6 +347,7 @@ class AdressaRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len if not self.hparams.use_plm else None,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=True,
             num_workers=self.hparams.num_workers,
@@ -338,6 +366,7 @@ class AdressaRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=False,
             num_workers=self.hparams.num_workers,
@@ -356,6 +385,7 @@ class AdressaRecDataModule(LightningDataModule):
                 max_title_len=self.hparams.max_title_len if not self.hparams.use_plm else None,
                 max_abstract_len=self.hparams.max_abstract_len,
                 concatenate_inputs=self.hparams.concatenate_inputs,
+                include_usr_eng=self.hparams.include_usr_eng,
             ),
             shuffle=False,
             num_workers=self.hparams.num_workers,

@@ -33,6 +33,7 @@ id2index_filenames:
   sentiment2index: "sentiment2index.tsv"
   uid2index: "uid2index.tsv"
   nid2index: "nid2index.tsv"
+  publishtime2index: "publishtime2index.tsv"
 
 use_plm: False
 use_pretrained_categ_embeddings: True
@@ -44,8 +45,9 @@ sentiment_annotator:
   model_name: "cardiffnlp/twitter-xlm-roberta-base-sentiment"
   tokenizer_max_len: 96
 
-train_date_split: 6
-test_date_split: 7
+train_date_split: "2017-01-05 00:00:00" # (2017/01/05) will be used for training
+val_date_split: "2017-01-06 00:00:00" # (2017/01/06) will be used for validation
+test_date_split: "2017-01-07 00:00:00" # (2017/01/07) will be used for testing
 neg_num: 20
 user_dev_size: 0.2
 
@@ -64,3 +66,4 @@ batch_size: 64
 num_workers: 0
 pin_memory: True
 drop_last: False
+include_usr_eng: False
