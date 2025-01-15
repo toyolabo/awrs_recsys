@@ -34,7 +34,7 @@ model:
   num_heads: 16
   query_dim: 200
   dropout_probability: 0.2
-  num_users: 98480
+  num_users: 98610 #83762
   long_short_term_method: "ini" # choose between "ini" and "con"
 
 callbacks:
