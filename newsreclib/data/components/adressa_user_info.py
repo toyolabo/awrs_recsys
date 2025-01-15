@@ -3,6 +3,7 @@
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 
 
 class UserInfo:
@@ -18,6 +19,7 @@ class UserInfo:
     def __init__(
         self,
         train_date_split: int,
+        val_date_split: int,
         test_date_split: int,
     ) -> None:
         self.hist_news = []
@@ -26,11 +28,15 @@ class UserInfo:
         self.train_news = []
         self.train_time = []
 
+        self.val_news = []
+        self.val_time = []
+
         self.test_news = []
         self.test_time = []
 
-        self.train_date_split = train_date_split
-        self.test_date_split = test_date_split
+        self.train_date_split = pd.to_datetime(train_date_split)
+        self.val_date_split = pd.to_datetime(val_date_split)
+        self.test_date_split = pd.to_datetime(test_date_split)
 
     def update(self, nindex: int, click_time: int, date: str):
         """
@@ -43,9 +49,13 @@ class UserInfo:
                 The processed click time used to assign the sample into the `history` of the user, the `train` or the `test` set.
 
         """
-        if date >= self.train_date_split and date < self.test_date_split:
+        date = pd.to_datetime(date)
+        if date >= self.train_date_split and date < self.val_date_split:
             self.train_news.append(nindex)
             self.train_time.append(click_time)
+        elif date >= self.val_date_split and date < self.test_date_split:
+            self.val_news.append(nindex)
+            self.val_time.append(click_time)
         elif date >= self.test_date_split:
             self.test_news.append(nindex)
             self.test_time.append(click_time)
@@ -58,6 +68,9 @@ class UserInfo:
         self.train_news = np.array(self.train_news)
         self.train_time = np.array(self.train_time, dtype="int32")
 
+        self.val_news = np.array(self.val_news)
+        self.val_time = np.array(self.val_time, dtype="int32")
+
         self.test_news = np.array(self.test_news)
         self.test_time = np.array(self.test_time, dtype="int32")
 
@@ -67,6 +80,10 @@ class UserInfo:
         order = np.argsort(self.train_time)
         self.train_news = self.train_news[order]
         self.train_time = self.train_time[order]
+
+        order = np.argsort(self.val_time)
+        self.val_news = self.val_news[order]
+        self.val_time = self.val_time[order]
 
         order = np.argsort(self.test_time)
         self.test_news = self.test_news[order]
