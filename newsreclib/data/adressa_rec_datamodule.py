@@ -315,7 +315,7 @@ class AdressaRecDataModule(LightningDataModule):
                 max_history_len=self.hparams.max_history_len,
                 neg_sampling_ratio=self.hparams.neg_sampling_ratio,
                 include_usr_eng=self.hparams.include_usr_eng,
-                news_metrics_bucket=trainset.news_metrics_bucket
+                # news_metrics_bucket=trainset.news_metrics_bucket
             )
             self.data_val = RecommendationDatasetTest(
                 news=validset.news,
