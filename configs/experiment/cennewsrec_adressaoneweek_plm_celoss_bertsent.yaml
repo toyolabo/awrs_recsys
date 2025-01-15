@@ -40,7 +40,7 @@ callbacks:
     patience: 3
 
 trainer:
-  max_epochs: 10
+  max_epochs: 3
 
 logger:
   wandb:

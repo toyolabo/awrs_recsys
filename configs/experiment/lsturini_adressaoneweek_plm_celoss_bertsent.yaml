@@ -34,7 +34,7 @@ model:
   num_heads: 16
   query_dim: 200
   dropout_probability: 0.2
-  num_users: 83762
+  num_users: 98480
   long_short_term_method: "ini" # choose between "ini" and "con"
 
 callbacks:
@@ -42,7 +42,7 @@ callbacks:
     patience: 3
 
 trainer:
-  max_epochs: 5
+  max_epochs: 3
 
 logger:
   wandb:
