@@ -67,3 +67,4 @@ num_workers: 0
 pin_memory: True
 drop_last: False
 include_usr_eng: False
+matrix_size: 5

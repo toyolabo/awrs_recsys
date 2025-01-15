@@ -137,7 +137,6 @@ class AdressaRecDataModule(LightningDataModule):
         pin_memory: bool,
         drop_last: bool,
         include_usr_eng: Optional[bool],
-        pop_k: Optional[int],
         matrix_size: Optional[int],
     ) -> None:
         super().__init__()
@@ -221,7 +220,6 @@ class AdressaRecDataModule(LightningDataModule):
             validation=False,
             download=True,
             include_usr_eng=self.hparams.include_usr_eng,
-            pop_k=self.hparams.pop_k
         )
 
     def setup(self, stage: Optional[str] = None):
@@ -256,7 +254,6 @@ class AdressaRecDataModule(LightningDataModule):
                 validation=False,
                 download=False,
                 include_usr_eng=self.hparams.include_usr_eng,
-                pop_k=self.hparams.pop_k,
                 matrix_size=self.hparams.matrix_size
             )
             validset = AdressaDataFrame(
@@ -283,7 +280,6 @@ class AdressaRecDataModule(LightningDataModule):
                 validation=True,
                 download=False,
                 include_usr_eng=self.hparams.include_usr_eng,
-                pop_k=self.hparams.pop_k,
                 matrix_size=self.hparams.matrix_size
             )
             testset = AdressaDataFrame(
@@ -310,7 +306,6 @@ class AdressaRecDataModule(LightningDataModule):
                 validation=False,
                 download=False,
                 include_usr_eng=self.hparams.include_usr_eng,
-                pop_k=self.hparams.pop_k,
                 matrix_size=self.hparams.matrix_size
             )
 
@@ -320,7 +315,6 @@ class AdressaRecDataModule(LightningDataModule):
                 max_history_len=self.hparams.max_history_len,
                 neg_sampling_ratio=self.hparams.neg_sampling_ratio,
                 include_usr_eng=self.hparams.include_usr_eng,
-                pop_k=self.hparams.pop_k,
                 news_metrics_bucket=trainset.news_metrics_bucket
             )
             self.data_val = RecommendationDatasetTest(

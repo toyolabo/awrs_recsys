@@ -110,7 +110,6 @@ class AdressaDataFrame(Dataset):
         download: bool,
         file_type: Optional[bool] = "acc",
         include_usr_eng: Optional[bool] = False,
-        pop_k: Optional[int] = 0,
         matrix_size: Optional[int] = 5,
     ) -> None:
         super().__init__()
@@ -124,8 +123,6 @@ class AdressaDataFrame(Dataset):
 
         self.include_usr_eng = include_usr_eng
         self.file_type = file_type
-
-        self.pop_k = pop_k
 
         self.use_plm = use_plm
         self.use_pretrained_categ_embeddings = use_pretrained_categ_embeddings
@@ -198,19 +195,6 @@ class AdressaDataFrame(Dataset):
         self.word_embeddings_fpath = word_embeddings_fpath
 
         self.news, self.behaviors = self.load_data()
-
-        if self.pop_k > 0:
-            if self.file_type == "acc":
-                news_metrics_bucket = pd.read_pickle('./data/Adressa_one_week_metrics_bucket/adressa_news_metrics_bucket_acc.pkl')
-                news_metrics_bucket['time_bucket_start_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_start_hour'], format='%Y-%m-%d %H:%M:%S')
-                news_metrics_bucket['time_bucket_end_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_end_hour'], format='%Y-%m-%d %H:%M:%S')
-            elif self.file_type == "ptb":
-                news_metrics_bucket = pd.read_pickle('./data/Adressa_one_week_metrics_bucket/adressa_news_metrics_bucket_ptb.pkl')
-                news_metrics_bucket['time_bucket_start_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_start_hour'], format='%Y-%m-%d %H:%M:%S')
-                news_metrics_bucket['time_bucket_end_hour'] = pd.to_datetime(news_metrics_bucket['time_bucket_end_hour'], format='%Y-%m-%d %H:%M:%S')
-            self.news_metrics_bucket = news_metrics_bucket
-        else:
-            self.news_metrics_bucket = None
 
     def __getitem__(self, index) -> Tuple[Any, Any, Any]:
         user_bhv = self.behaviors.iloc[index]
