@@ -20,7 +20,6 @@ seed: 42
 data:
   dataset_size: "small"
   batch_size: 8
-  include_ctr: False
   include_usr_eng: True
   matrix_size: 5
 
