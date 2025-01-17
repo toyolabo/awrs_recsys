@@ -381,7 +381,7 @@ def _get_usr_eng(
 
     # Avoid the model to see the "future", each impression should access the time bucket 1 hour before the impression time
     behaviors["time"] = pd.to_datetime(behaviors["time"])
-    timedelta = 1 # Adressa (5) | MIND (1)
+    timedelta = 5 # Adressa (5) | MIND (1)
     behaviors["time"] = behaviors["time"] - pd.Timedelta(hours=timedelta)
 
     # Get User engagment for history column
