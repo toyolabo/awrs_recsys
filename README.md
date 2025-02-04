@@ -40,3 +40,18 @@ Please install all the dependencies as explained in the NewsRecLib repository. T
 ```
 python newsreclib/train.py experiment=awrs_mindsmall_plm_celoss_bertsent
 ```
+
+## Citation
+
+```
+@misc{azevedo2025looknewsavoidanceawrs,
+      title={A Look Into News Avoidance Through AWRS: An Avoidance-Aware Recommender System}, 
+      author={Igor L. R. Azevedo and Toyotaro Suzumura and Yuichiro Yasui},
+      year={2025},
+      eprint={2407.09137},
+      archivePrefix={arXiv},
+      primaryClass={cs.IR},
+      note={SIAM International Conference on Data Mining (SDM25)},
+      url={https://arxiv.org/abs/2407.09137}
+}
+```
